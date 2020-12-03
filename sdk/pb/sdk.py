@@ -315,6 +315,7 @@ class ModelConfig(object):
         self.resize: list = self.field_root.get('Resize')
         self.output_split = self.field_root.get('OutputSplit')
         self.output_split = self.output_split if self.output_split else ""
+        self.category_split = self.field_root.get('CategorySplit')
         self.corp_params = self.field_root.get('CorpParams')
         self.output_coord = self.field_root.get('OutputCoord')
         self.batch_model = self.field_root.get('BatchModel')
@@ -516,22 +517,28 @@ class Interface(object):
 
     def predict_func(self, image_batch, _sess, dense_decoded, op_input, model: ModelConfig, output_split=None):
 
-        if output_split is None:
-            output_split = model.output_split
+        output_split = model.output_split if output_split is None else output_split
+
+        category_split = model.category_split if model.category_split else ""
 
         dense_decoded_code = _sess.run(dense_decoded, feed_dict={
             op_input: image_batch,
         })
         decoded_expression = []
-        for item in dense_decoded_code:
-            expression = ''
 
+        for item in dense_decoded_code:
+            expression = []
             for i in item:
                 if i == -1 or i == model.category_num:
-                    expression += ''
+                    expression.append("")
                 else:
-                    expression += self.decode_maps(model.category)[i]
-            decoded_expression.append(expression)
+                    expression.append(self.decode_maps(model.category)[i])
+
+            decoded_expression.append(category_split.join(expression))
+
+        if output_split is None:
+            output_split = model.output_split
+
         return output_split.join(decoded_expression) if len(decoded_expression) > 1 else decoded_expression[0]
 
 
@@ -590,26 +597,30 @@ class ImageUtils(object):
         def load_image(image_bytes):
             data_stream = io.BytesIO(image_bytes)
             pil_image = PIL_Image.open(data_stream)
-            rgb = pil_image.split()
-            size = pil_image.size
 
             gif_handle = model.pre_concat_frames != -1 or model.pre_blend_frames != -1
 
-            if len(rgb) > 3 and model.pre_replace_transparent and gif_handle:
+            if pil_image.mode == 'P' and not gif_handle:
+                pil_image = pil_image.convert('RGB')
+
+            rgb = pil_image.split()
+            size = pil_image.size
+
+            if (len(rgb) > 3 and model.pre_replace_transparent) and not gif_handle:
                 background = PIL_Image.new('RGB', pil_image.size, (255, 255, 255))
                 background.paste(pil_image, (0, 0, size[0], size[1]), pil_image)
                 pil_image = background
 
             im = np.asarray(pil_image)
 
-            if model.image_channel == 1 and len(im.shape) == 3:
-                im = cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)
-
             im = Pretreatment.preprocessing_by_func(
                 exec_map=model.exec_map,
                 key=param_key,
                 src_arr=im
             )
+
+            if model.image_channel == 1 and len(im.shape) == 3:
+                im = cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)
 
             im = Pretreatment.preprocessing(
                 image=im,
@@ -721,13 +732,3 @@ if __name__ == '__main__':
     # for i in [b] * 1000:
     #     t1 = time.time()
     #     print(sdk.predict(b), (time.time() - t1)*1000)
-
-    # FROM BYTES
-    with open(r"model.pl", "rb") as f:
-        b = f.read()
-    sdk = SDK(model_entity=b)
-    with open(r"1540868881850.jpg", "rb") as f:
-        b = f.read()
-    for i in [b] * 1000:
-        t1 = time.time()
-        print(sdk.predict(b), (time.time() - t1) * 1000)

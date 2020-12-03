@@ -314,6 +314,7 @@ class ModelConfig(object):
         self.resize: list = self.field_root.get('Resize')
         self.output_split = self.field_root.get('OutputSplit')
         self.output_split = self.output_split if self.output_split else ""
+        self.category_split = self.field_root.get('CategorySplit')
         self.corp_params = self.field_root.get('CorpParams')
         self.output_coord = self.field_root.get('OutputCoord')
         self.batch_model = self.field_root.get('BatchModel')
@@ -326,7 +327,6 @@ class ModelConfig(object):
         self.pre_concat_frames = self.get_var(self.pretreatment_root, 'ConcatFrames', -1)
         self.pre_blend_frames = self.get_var(self.pretreatment_root, 'BlendFrames', -1)
         self.exec_map = self.pretreatment_root.get('ExecuteMap')
-
         """COMPILE_MODEL"""
         if self.graph_path:
             self.compile_model_path = os.path.join(self.graph_path, '{}.onnx'.format(self.model_name))
@@ -459,22 +459,25 @@ class Interface(object):
     def predict_func(self, image_batch, _sess, model: ModelConfig, output_split=None):
         if isinstance(image_batch, list):
             image_batch = np.asarray(image_batch)
-        if output_split is None:
-            output_split = model.output_split
+
+        output_split = model.output_split if output_split is None else output_split
+
+        category_split = model.category_split if model.category_split else ""
 
         dense_decoded_code = _sess.run(["dense_decoded:0"], input_feed={
             "input:0": image_batch,
         })
         decoded_expression = []
-        for item in dense_decoded_code[0]:
-            expression = ''
 
+        for item in dense_decoded_code[0]:
+            expression = []
             for i in item:
                 if i == -1 or i == model.category_num:
-                    expression += ''
+                    expression.append("")
                 else:
-                    expression += self.decode_maps(model.category)[i]
-            decoded_expression.append(expression)
+                    expression.append(self.decode_maps(model.category)[i])
+
+            decoded_expression.append(category_split.join(expression))
         return output_split.join(decoded_expression) if len(decoded_expression) > 1 else decoded_expression[0]
 
 
@@ -533,26 +536,30 @@ class ImageUtils(object):
         def load_image(image_bytes):
             data_stream = io.BytesIO(image_bytes)
             pil_image = PIL_Image.open(data_stream)
-            rgb = pil_image.split()
-            size = pil_image.size
 
             gif_handle = model.pre_concat_frames != -1 or model.pre_blend_frames != -1
 
-            if len(rgb) > 3 and model.pre_replace_transparent and gif_handle:
+            if pil_image.mode == 'P' and not gif_handle:
+                pil_image = pil_image.convert('RGB')
+
+            rgb = pil_image.split()
+            size = pil_image.size
+
+            if (len(rgb) > 3 and model.pre_replace_transparent) and not gif_handle:
                 background = PIL_Image.new('RGB', pil_image.size, (255, 255, 255))
                 background.paste(pil_image, (0, 0, size[0], size[1]), pil_image)
                 pil_image = background
 
             im = np.asarray(pil_image)
 
-            if model.image_channel == 1 and len(im.shape) == 3:
-                im = cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)
-
             im = Pretreatment.preprocessing_by_func(
                 exec_map=model.exec_map,
                 key=param_key,
                 src_arr=im
             )
+
+            if model.image_channel == 1 and len(im.shape) == 3:
+                im = cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)
 
             im = Pretreatment.preprocessing(
                 image=im,

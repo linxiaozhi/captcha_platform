@@ -18,6 +18,7 @@ from constants import Response, SystemConfig
 from pretreatment import preprocessing, preprocessing_by_func
 from config import ModelConfig, Config
 from middleware.impl.gif_frames import concat_frames, blend_frame
+from middleware.impl.rgb_filter import rgb_filter
 
 
 class Arithmetic(object):
@@ -97,7 +98,8 @@ class ImageUtils(object):
                 else:
                     bytes_batch = [base64_or_bytes]
             elif isinstance(base64_or_bytes, list):
-                bytes_batch = [base64.b64decode(b64_filter_s(i).encode('utf-8')) for i in base64_or_bytes if isinstance(i, str)]
+                bytes_batch = [base64.b64decode(b64_filter_s(i).encode('utf-8')) for i in base64_or_bytes if
+                               isinstance(i, str)]
                 if not bytes_batch:
                     bytes_batch = [base64.b64decode(b64_filter_b(i)) for i in base64_or_bytes if isinstance(i, bytes)]
             else:
@@ -107,33 +109,40 @@ class ImageUtils(object):
         except binascii.Error:
             return None, response.INVALID_BASE64_STRING
         what_img = [ImageUtils.test_image(i) for i in bytes_batch]
+
         if None in what_img:
             return None, response.INVALID_IMAGE_FORMAT
         return bytes_batch, response.SUCCESS
 
     @staticmethod
-    def get_image_batch(model: ModelConfig, bytes_batch, param_key=None):
+    def get_image_batch(model: ModelConfig, bytes_batch, param_key=None, extract_rgb: list = None):
         # Note that there are two return objects here.
         # 1.image_batch, 2.response
 
         response = Response(model.conf.response_def_map)
 
-        def load_image(image_bytes):
+        def load_image(image_bytes: bytes):
             data_stream = io.BytesIO(image_bytes)
-            pil_image = PIL_Image.open(data_stream).convert('RGB')
+            pil_image = PIL_Image.open(data_stream)
 
-            # if pil_image.mode == 'P':
-            #     pil_image = pil_image.convert('RGB')
+            gif_handle = model.pre_concat_frames != -1 or model.pre_blend_frames != -1
+
+            if pil_image.mode == 'P' and not gif_handle:
+                pil_image = pil_image.convert('RGB')
 
             rgb = pil_image.split()
             size = pil_image.size
 
-            gif_handle = model.pre_concat_frames != -1 or model.pre_blend_frames != -1
-
             if (len(rgb) > 3 and model.pre_replace_transparent) and not gif_handle:
                 background = PIL_Image.new('RGB', pil_image.size, (255, 255, 255))
-                background.paste(pil_image, (0, 0, size[0], size[1]), pil_image)
-                pil_image = background
+                try:
+                    background.paste(pil_image, (0, 0, size[0], size[1]), pil_image)
+                    pil_image = background
+                except:
+                    pil_image = pil_image.convert('RGB')
+
+            if len(pil_image.split()) > 3 and model.image_channel == 3:
+                pil_image = pil_image.convert('RGB')
 
             if model.pre_concat_frames != -1:
                 im = concat_frames(pil_image, model.pre_concat_frames)
@@ -141,6 +150,9 @@ class ImageUtils(object):
                 im = blend_frame(pil_image, model.pre_blend_frames)
             else:
                 im = np.asarray(pil_image)
+
+            if extract_rgb:
+                im = rgb_filter(im, extract_rgb)
 
             im = preprocessing_by_func(
                 exec_map=model.exec_map,

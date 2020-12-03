@@ -61,14 +61,27 @@ class SystemConfig:
     default_config = {
         "System": {
             "DefaultModel": "default",
-            "SplitFlag": b'\x99\x99\x99\x00\xff\xff\xff\x00\x99\x99\x99',
+            "SplitFlag": b'\x99\x99\x99\x00\xff\xff999999.........99999\xff\x00\x99\x99\x99',
             "SavePath": "",
             "RequestCountInterval": 86400,
             "GlobalRequestCountInterval": 86400,
             "RequestLimit": -1,
             "GlobalRequestLimit": -1,
             "WithoutLogger": False,
-            "RequestSizeLimit": {}
+            "RequestSizeLimit": {},
+            "DefaultPort": 19952,
+            "IllegalTimeMessage": "The maximum number of requests has been exceeded.",
+            "ExceededMessage": "Illegal access time, please request in open hours.",
+            "BlacklistTriggerTimes": -1,
+            "Whitelist": False,
+            "ErrorMessage": {
+                400: "Bad Request",
+                401: "Unicode Decode Error",
+                403: "Forbidden",
+                404: "404 Not Found",
+                405: "Method Not Allowed",
+                500: "Internal Server Error"
+            }
         },
         "RouteMap": default_route,
         "Security": {
@@ -84,7 +97,7 @@ class SystemConfig:
             "StatusCode": "code",
             "StatusBool": "success",
             "Uid": "uid",
-        },
+        }
     }
 
 
